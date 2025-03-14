@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pesos e Medidas PREXX</title>
+    <script type="module">
+        // Importar as funções necessárias do SDKs que você precisa
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
+        import { getFirestore, collection, setDoc, getDoc, doc, getDocs } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
+        import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-storage.js";
+
+        // Configuração do Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyAtDJQ507wTvfmv-t9OPjWmtaKHDgAQHng",
+            authDomain: "pesosemedidasprexx.firebaseapp.com",
+            databaseURL: "https://pesosemedidasprexx-default-rtdb.firebaseio.com",
+            projectId: "pesosemedidasprexx",
+            storageBucket: "pesosemedidasprexx.appspot.com",
+            messagingSenderId: "133923312504",
+            appId: "1:133923312504:web:8544bf8094cf1c3b272e8d"
+        };
+
+        // Inicializar o Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const storage = getStorage(app);
+
+        // Script do Vue.js
+        import { createApp, ref, computed } from "https://unpkg.com/vue@3/dist/vue.esm-browser.js";
+
+        createApp({
+            setup() {
+                const isLoggedIn = ref(false);
+                const isVisitor = ref(false);
+                const username = ref('');
+                const password = ref('');
+                const searchQuery = ref('');
+                const products = ref([]);
+                const showAddProductForm = ref(false);
+                const showEditProductForm = ref(false);
+                const editProductData = ref(null);
+                const newProduct = ref({
+                    code: '',
+                    description: '',
+                    ean: '',
+                    masterBoxQuantity: null,
+                    masterBoxSize: '',
+                    masterBoxWeight: null,
+                    smallBoxQuantity: null,
+                    smallBoxSize: '',
+                    smallBoxWeight: null,
+                    unitSize: '',
+                    unitWeight: null,
+                    image: null
+                });
+                const message = ref('');
+                const isError = ref(false);
+
+                const adminUsers = {
+                    'Anderson': '10203011',
+                    'João': '10203011',
+                    'Willian': '10203011',
+                    'Raul': '10203011',
+                    'Iran': '10203011'
+                };
+
+                const filteredProducts = computed(() => {
+                    if (!searchQuery.value) return products.value;
+                    const query = searchQuery.value.toLowerCase();
+                    return products.value.filter(product =>
+                        product.code.toLowerCase().includes(query) ||
+                        product.description.toLowerCase().includes(query) ||
+                        product.ean.toLowerCase().includes(query)
+                    );
+                });
+
+                const login = () => {
+                    if (adminUsers[username.value] === password.value) {
+                        isLoggedIn.value = true;
+                        username.value = '';
+                        password.value = '';
+                        loadProducts();
+                    } else {
+                        showMessage('Usuário ou senha inválidos', true);
+                    }
+                };
+
+                const enterAsVisitor = () => {
+                    isVisitor.value = true;
+                    loadProducts();
+                };
+
+                const backToLogin = () => {
+                    isVisitor.value = false;
+                    products.value = [];
+                };
+
+                const searchProducts = () => {
+                    if (filteredProducts.value.length === 0) {
+                        showMessage('Produto ainda não cadastrado!', true);
+                    } else {
+                        message.value = '';
+                    }
+                };
+
+                const addProduct = async () => {
+                    if (newProduct.value.code && newProduct.value.description && newProduct.value.masterBoxQuantity && newProduct.value.unitSize && newProduct.value.unitWeight) {
+                        try {
+                            // Verifica se o produto já existe
+                            const docRef = doc(db, 'products', newProduct.value.code);
+                            const docSnap = await getDoc(docRef);
+
+                            if (docSnap.exists()) {
+                                showMessage('Produto já existe na base de dados', true);
+                                return;
+                            }
+
+                            // Faz upload da imagem se estiver presente
+                            let imageUrl = null;
+                            if (newProduct.value.image) {
+                                const imageRef = storageRef(storage, `product_images/${newProduct.value.code}`);
+                                await uploadBytes(imageRef, newProduct.value.image);
+                                imageUrl = await getDownloadURL(imageRef);
+                            }
+
+                            // Cria um novo produto sem o objeto File
+                            const productData = {
+                                ...newProduct.value,
+                                imageUrl // Adiciona o URL da imagem
+                            };
+
+                            // Limpa o campo image para evitar problemas
+                            delete productData.image;
+
+                            // Adiciona o produto ao Firestore
+                            await setDoc(docRef, productData);
+
+                            // Atualiza a lista de produtos
+                            products.value.push({ ...productData, imageUrl });
+                            Object.keys(newProduct.value).forEach(key => newProduct.value[key] = ''); // Limpa os campos do formul?rio
+                            showAddProductForm.value = false;
+                            showMessage('Produto adicionado com sucesso', false);
+                        } catch (error) {
+                            console.error('Erro ao adicionar produto:', error);
+                            showMessage('Erro ao adicionar produto', true);
+                        }
+                    } else {
+                        showMessage('Por favor, preencha todos os campos obrigat?rios', true);
+                    }
+                };
+
+                const editProduct = (product) => {
+                    editProductData.value = { ...product }; // Cria uma cópia dos dados do produto para edição
+                    showEditProductForm.value = true;
+                };
+
+                const updateProduct = async () => {
+                    if (editProductData.value) {
+                        try {
+                            const docRef = doc(db, 'products', editProductData.value.code);
+                            
+                            // Faz upload da nova imagem se estiver presente
+                            let imageUrl = editProductData.value.imageUrl;
+                            if (editProductData.value.image) {
+                                const imageRef = storageRef(storage, `product_images/${editProductData.value.code}`);
+                                await uploadBytes(imageRef, editProductData.value.image);
+                                imageUrl = await getDownloadURL(imageRef);
+                            }
+
+                            // Atualiza o produto no Firestore
+                            const updatedProductData = {
+                                ...editProductData.value,
+                                imageUrl // Atualiza o URL da imagem
+                            };
+                            
+                            // Limpa o campo image para evitar problemas
+                            delete updatedProductData.image;
+
+                            await setDoc(docRef, updatedProductData);
+
+                            // Atualiza a lista de produtos
+                            const index = products.value.findIndex(p => p.code === editProductData.value.code);
+                            if (index > -1) {
+                                products.value[index] = { ...updatedProductData, imageUrl };
+                            }
+
+                            showEditProductForm.value = false;
+                            showMessage('Produto atualizado com sucesso', false);
+                        } catch (error) {
+                            console.error('Erro ao atualizar produto:', error);
+                            showMessage('Erro ao atualizar produto', true);
+                        }
+                    } else {
+                        showMessage('Dados do produto inválidos', true);
+                    }
+                };
+
+                const deleteProduct = async (product) => {
+                    try {
+                        await setDoc(doc(db, 'products', product.code), { deleted: true });
+                        products.value = products.value.filter(p => p.code !== product.code);
+                        showMessage('Produto excluído com sucesso', false);
+                    } catch (error) {
+                        console.error('Erro ao excluir produto:', error);
+                        showMessage('Erro ao excluir produto', true);
+                    }
+                };
+
+                const handleFileUpload = (event) => {
+                    const file = event.target.files[0];
+                    if (file) {
+                        if (showEditProductForm.value) {
+                            editProductData.value.image = file; // Armazena o objeto File para edição
+                        } else {
+                            newProduct.value.image = file; // Armazena o objeto File para adição
+                        }
+                    }
+                };
+
+                const loadProducts = async () => {
+                    try {
+                        const querySnapshot = await getDocs(collection(db, 'products'));
+                        products.value = querySnapshot.docs.map(doc => doc.data());
+                    } catch (error) {
+                        console.error('Erro ao carregar produtos:', error);
+                        showMessage('Erro ao carregar produtos', true);
+                    }
+                };
+
+                const showMessage = (msg, error) => {
+                    message.value = msg;
+                    isError.value = error;
+                    setTimeout(() => {
+                        message.value = '';
+                    }, 3000);
+                };
+
+                return {
+                    isLoggedIn,
+                    isVisitor,
+                    username,
+                    password,
+                    searchQuery,
+                    products,
+                    showAddProductForm,
+                    showEditProductForm,
+                    editProductData,
+                    newProduct,
+                    message,
+                    isError,
+                    filteredProducts,
+                    login,
+                    enterAsVisitor,
+                    backToLogin,
+                    searchProducts,
+                    addProduct,
+                    editProduct,
+                    updateProduct,
+                    deleteProduct,
+                    handleFileUpload
+                };
+            }
+        }).mount('#app');
+    </script>
+    <style>
+        body {
+            font-family: 'Comic Sans MS', sans-serif;
+            background-color: #000;
+            color: #fff;
+            text-align: center;
+        }
+        h1, h2 {
+            color: #00f;
+            font-weight: bold;
+            text-shadow: 0 0 10px #00f;
+        }
+        .error {
+            color: #f00;
+        }
+        .success {
+            color: #0f0;
+        }
+        .button {
+            background-color: #00f; /* Azul neon */
+            color: #fff; /* Texto branco para contraste */
+            border: none;
+            padding: 10px 20px;
+            margin: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.3s;
+        }
+        .button-blue {
+            background-color: #00f;
+        }
+        .button:hover {
+            background-color: #0c0;
+        }
+        .button-blue:hover {
+            background-color: #00c;
+        }
+        input[type="text"], input[type="password"], input[type="file"] {
+            background-color: #222;
+            border: 1px solid #555;
+            color: #fff;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px;
+            width: 300px;
+            box-sizing: border-box;
+            font-size: 1rem;
+        }
+        label {
+            display: block;
+            margin: 10px 0;
+        }
+        .form-group {
+            margin: 20px 0;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+			padding-bottom: 80px; /* Espaço para o rodapé */
+            position: relative;
+        }
+		.footer {
+            background-color: #111;
+            color: #00f;
+            text-align: center;
+            padding: 10px;
+            position: absolute;
+            width: 100%;
+            bottom: 0;
+			left: 0;
+        }
+		
+		.neon-text {
+            color: #00f; /* Azul neon */
+            text-shadow: 0 0 10px #00f, 0 0 20px #00f, 0 0 30px #00f;
+            font-weight: bold;
+            animation: pulse 1.5s infinite;
+			
+		}	
+		
+		@keyframes pulse {
+            0% {
+               text-shadow: 0 0 10px #00f, 0 0 20px #00f, 0 0 30px #00f;
+        }
+            50% {
+                text-shadow: 0 0 15px #00f, 0 0 30px #00f, 0 0 45px #00f;
+        }
+           100% {
+                text-shadow: 0 0 10px #00f, 0 0 20px #00f, 0 0 30px #00f;
+    }
+}
+    </style>
+</head>
+<body>
+    <div id="app" class="container">
+        <h1>Pesos e Medidas PREXX</h1>
+        <div v-if="!isLoggedIn && !isVisitor">
+            <div class="form-group">
+                <label for="username">Usuário:</label>
+                <input type="text" id="username" v-model="username">
+            </div>
+            <div class="form-group">
+                <label for="password">Senha:</label>
+                <input type="password" id="password" v-model="password">
+            </div>
+            <button class="button" @click="login">Login</button>
+            <button class="button button-blue" @click="enterAsVisitor">Entrar como Visitante</button>
+			
+			<!-- Adicionando a mensagem de Powered By e Direitos Reservados -->
+            <div class="footer">
+                <p class="neon-text">Powered By Anderson Montibeller Ramos</p>
+                <p class="neon-text">Todos os direitos reservados 2025</p>
+            </div>
+        </div>
+        <div v-if="isLoggedIn || isVisitor">
+            <div v-if="message" :class="{ 'error': isError, 'success': !isError }">{{ message }}</div>
+            <div class="form-group">
+                <label for="search">Pesquisar:</label>
+                <input type="text" id="search" v-model="searchQuery">
+                <button class="button button-blue" @click="searchProducts">Buscar</button>
+            </div>
+            <button class="button" v-if="!isVisitor && !showAddProductForm" @click="showAddProductForm = true">Adicionar Produto</button>
+            <button class="button button-blue" v-if="isVisitor" @click="backToLogin">Voltar ao Login</button>
+            <div v-if="showAddProductForm">
+                <div class="form-group">
+                    <label for="code">Código:</label>
+                    <input type="text" id="code" v-model="newProduct.code">
+                </div>
+                <div class="form-group">
+                    <label for="description">Descrição:</label>
+                    <input type="text" id="description" v-model="newProduct.description">
+                </div>
+                <div class="form-group">
+                    <label for="ean">EAN:</label>
+                    <input type="text" id="ean" v-model="newProduct.ean">
+                </div>
+                <div class="form-group">
+                    <label for="masterBoxQuantity">Quantidade da Master Box:</label>
+                    <input type="text" id="masterBoxQuantity" v-model="newProduct.masterBoxQuantity">
+                </div>
+                <div class="form-group">
+                    <label for="masterBoxSize">Tamanho da Master Box (CM):</label>
+                    <input type="text" id="masterBoxSize" v-model="newProduct.masterBoxSize">
+                </div>
+                <div class="form-group">
+                    <label for="masterBoxWeight">Peso da Master Box (KG):</label>
+                    <input type="text" id="masterBoxWeight" v-model="newProduct.masterBoxWeight">
+                </div>
+                <div class="form-group">
+                    <label for="smallBoxQuantity">Quantidade da Small Box:</label>
+                    <input type="text" id="smallBoxQuantity" v-model="newProduct.smallBoxQuantity">
+                </div>
+                <div class="form-group">
+                    <label for="smallBoxSize">Tamanho da Small Box (CM):</label>
+                    <input type="text" id="smallBoxSize" v-model="newProduct.smallBoxSize">
+                </div>
+                <div class="form-group">
+                    <label for="smallBoxWeight">Peso da Small Box (KG):</label>
+                    <input type="text" id="smallBoxWeight" v-model="newProduct.smallBoxWeight">
+                </div>
+                <div class="form-group">
+                    <label for="unitSize">Tamanho da Unidade (CM):</label>
+                    <input type="text" id="unitSize" v-model="newProduct.unitSize">
+                </div>
+                <div class="form-group">
+                    <label for="unitWeight">Peso da Unidade (KG):</label>
+                    <input type="text" id="unitWeight" v-model="newProduct.unitWeight">
+                </div>
+                <div class="form-group">
+                    <label for="image">Imagem:</label>
+                    <input type="file" id="image" @change="handleFileUpload">
+                </div>
+                <button class="button" @click="addProduct">Adicionar Produto</button>
+                <button class="button button-blue" @click="showAddProductForm = false">Cancelar</button>
+            </div>
+            <div v-if="showEditProductForm && editProductData">
+                <div class="form-group">
+                    <label for="editCode">Código:</label>
+                    <input type="text" id="editCode" v-model="editProductData.code" disabled>
+                </div>
+                <div class="form-group">
+                    <label for="editDescription">Descrição:</label>
+                    <input type="text" id="editDescription" v-model="editProductData.description">
+                </div>
+                <div class="form-group">
+                    <label for="editEan">EAN:</label>
+                    <input type="text" id="editEan" v-model="editProductData.ean">
+                </div>
+                <div class="form-group">
+                    <label for="editMasterBoxQuantity">Quantidade da Master Box:</label>
+                    <input type="text" id="editMasterBoxQuantity" v-model="editProductData.masterBoxQuantity">
+                </div>
+                <div class="form-group">
+                    <label for="editMasterBoxSize">Tamanho da Master Box (CM):</label>
+                    <input type="text" id="editMasterBoxSize" v-model="editProductData.masterBoxSize">
+                </div>
+                <div class="form-group">
+                    <label for="editMasterBoxWeight">Peso da Master Box (KG):</label>
+                    <input type="text" id="editMasterBoxWeight" v-model="editProductData.masterBoxWeight">
+                </div>
+                <div class="form-group">
+                    <label for="editSmallBoxQuantity">Quantidade da Small Box:</label>
+                    <input type="text" id="editSmallBoxQuantity" v-model="editProductData.smallBoxQuantity">
+                </div>
+                <div class="form-group">
+                    <label for="editSmallBoxSize">Tamanho da Small Box (CM):</label>
+                    <input type="text" id="editSmallBoxSize" v-model="editProductData.smallBoxSize">
+                </div>
+                <div class="form-group">
+                    <label for="editSmallBoxWeight">Peso da Small Box (KG):</label>
+                    <input type="text" id="editSmallBoxWeight" v-model="editProductData.smallBoxWeight">
+                </div>
+                <div class="form-group">
+                    <label for="editUnitSize">Tamanho da Unidade (CM):</label>
+                    <input type="text" id="editUnitSize" v-model="editProductData.unitSize">
+                </div>
+                <div class="form-group">
+                    <label for="editUnitWeight">Peso da Unidade (KG):</label>
+                    <input type="text" id="editUnitWeight" v-model="editProductData.unitWeight">
+                </div>
+                <div class="form-group">
+                    <label for="editImage">Imagem:</label>
+                    <input type="file" id="editImage" @change="handleFileUpload">
+                </div>
+                <button class="button" @click="updateProduct">Atualizar Produto</button>
+                <button class="button button-blue" @click="showEditProductForm = false">Cancelar</button>
+            </div>
+            <ul>
+                <li v-for="product in filteredProducts" :key="product.code">
+                    <div>
+                        <p><strong>Código:</strong> {{ product.code }}</p>
+                        <p><strong>Descrição:</strong> {{ product.description }}</p>
+                        <p><strong>EAN:</strong> {{ product.ean }}</p>
+                        <p><strong>Quantidade da Master Box:</strong> {{ product.masterBoxQuantity }}</p>
+                        <p><strong>Tamanho da Master Box (CM):</strong> {{ product.masterBoxSize }}</p>
+                        <p><strong>Peso da Master Box (KG):</strong> {{ product.masterBoxWeight }}</p>
+                        <p><strong>Quantidade da Small Box:</strong> {{ product.smallBoxQuantity }}</p>
+                        <p><strong>Tamanho da Small Box (CM):</strong> {{ product.smallBoxSize }}</p>
+                        <p><strong>Peso da Small Box (KG):</strong> {{ product.smallBoxWeight }}</p>
+                        <p><strong>Tamanho da Unidade (CM):</strong> {{ product.unitSize }}</p>
+                        <p><strong>Peso da Unidade (KG):</strong> {{ product.unitWeight }}</p>
+                        <div v-if="product.imageUrl">
+                            <img :src="product.imageUrl" alt="Imagem do produto" style="max-width: 200px; max-height: 200px;">
+                        </div>
+                        <button class="button" v-if="!isVisitor" @click="editProduct(product)">Editar</button>
+                        <button class="button button-blue" v-if="!isVisitor" @click="deleteProduct(product)">Excluir</button>
+                    </div>
+                </li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>
